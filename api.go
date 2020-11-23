@@ -33,7 +33,6 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		res, err := getResponse(w, r)
 		if err != nil {
-			fmt.Println(os.Getenv("GOOGLE_CLOUD_PROJECT"))
 			fmt.Println(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

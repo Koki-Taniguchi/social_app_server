@@ -1,5 +1,3 @@
-IMAGE_NAME := social_app_server
-
 .PHONY: restart
 restart: stop run-all
 
@@ -24,8 +22,8 @@ pack-build:
 .PHONY: run
 run:
 	docker run -d --name $(IMAGE_NAME) --rm \
-	-e GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) \
-	-e GOOGLE_APPLICATION_CREDENTIALS=$(GOOGLE_APPLICATION_CREDENTIALS) \
+	-e GOOGLE_CLOUD_PROJECT \
+	-e GOOGLE_APPLICATION_CREDENTIALS \
 	-p 8080:8080 \
 	$(IMAGE_NAME)
 
