@@ -56,6 +56,7 @@ func getResponse(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	if err != nil {
 		return []byte{}, wrapError(err)
 	}
+	defer client.Close()
 
 	iter, err := client.Collection("photos").Documents(ctx).GetAll()
 	if err != nil {
