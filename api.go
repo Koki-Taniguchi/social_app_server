@@ -1,9 +1,16 @@
 package p
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
+
+	"cloud.google.com/go/firestore"
+	"github.com/google/uuid"
+	"github.com/pkg/errors"
 )
 
 // Photo ...
@@ -15,27 +22,8 @@ type Photo struct {
 	Longitude float32 `json:"longitude"`
 }
 
-var testData = `{
-  "photos": [
-    {
-      "id": "photo12",
-      "title": "photoTitle1",
-      "image": "https://1.bp.blogspot.com/-YnNw0nmy5WY/X5OcdKUoDhI/AAAAAAABb-w/Ws-6a4R4Io4IAWwuxtx8ilCxY9RgmKGHgCNcBGAsYHQ/s180-c/nature_ocean_kaisou.png",
-      "latitude": 35.6583865,
-      "longitude": 139.7023339
-    },
-    {
-      "id": "photo2",
-      "title": "photoTitle2",
-      "image": "https://1.bp.blogspot.com/-pc0hWuQtWHA/Xv3UGn3if2I/AAAAAAABZzs/3eWp3hEJZ2AQNtd8gEZf7BsA8xGsfC02gCNcBGAsYHQ/s400/city_kabukichou.png",
-      "latitude": 35.658319,
-      "longitude": 139.702232
-    }
-  ]
-}`
-
-// MethodGetResponse ...
-type MethodGetResponse struct {
+// ListResponse ...
+type ListResponse struct {
 	Photos []Photo `json:"photos"`
 }
 
@@ -45,6 +33,8 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		res, err := getResponse(w, r)
 		if err != nil {
+			fmt.Println(os.Getenv("GOOGLE_CLOUD_PROJECT"))
+			fmt.Println(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -52,6 +42,7 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(res)
 	case http.MethodPost:
+		uuid.NewUUID()
 		fmt.Fprint(w, "post")
 	case http.MethodPatch:
 		fmt.Fprint(w, "patch")
@@ -61,26 +52,47 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 }
 
 func getResponse(w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	resData, err := getTestResponseData()
+	ctx := r.Context()
+	client, err := createClient(ctx)
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, wrapError(err)
 	}
 
-	res, err := json.Marshal(resData)
+	iter, err := client.Collection("photos").Documents(ctx).GetAll()
 	if err != nil {
+		return []byte{}, wrapError(err)
+	}
 
-		return []byte{}, err
+	photos := make([]Photo, 0, len(iter))
+
+	for _, doc := range iter {
+		var p Photo
+		doc.DataTo(&p)
+		photos = append(photos, p)
+	}
+
+	res, err := json.Marshal(ListResponse{Photos: photos})
+	if err != nil {
+		return []byte{}, wrapError(err)
 	}
 
 	return res, nil
 }
 
-func getTestResponseData() (MethodGetResponse, error) {
-	var ret MethodGetResponse
+func createClient(ctx context.Context) (*firestore.Client, error) {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
 
-	if err := json.Unmarshal([]byte(testData), &ret); err != nil {
-		return MethodGetResponse{}, err
+	client, err := firestore.NewClient(ctx, projectID)
+	if err != nil {
+		return &firestore.Client{}, wrapError(err)
 	}
 
-	return ret, nil
+	return client, nil
+}
+
+func wrapError(err error) error {
+	pc, _, line, _ := runtime.Caller(1)
+	f := runtime.FuncForPC(pc)
+	message := fmt.Sprintf("\nerror in %s method. line: %d", f.Name(), line)
+	return errors.Wrap(err, message)
 }

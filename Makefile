@@ -1,20 +1,33 @@
 IMAGE_NAME := social_app_server
 
+.PHONY: restart
+restart: stop run-all
+
 .PHONY: run-all
 run-all: build run
 
 .PHONY: build
-build:
+build: image-build pack-build
+
+.PHONY: image-build
+image-build:
+	docker build -t $(IMAGE_NAME) -f Dockerfile .
+
+.PHONY: pack-build
+pack-build:
 	pack build \
-		--builder gcr.io/buildpacks/builder:v1 \
+		--builder $(IMAGE_NAME) \
 		--env GOOGLE_FUNCTION_SIGNATURE_TYPE=http \
 		--env GOOGLE_FUNCTION_TARGET=HTTPFunction \
-		--env GOOGLE_DEVMODE=true \
 		$(IMAGE_NAME)
 
 .PHONY: run
 run:
-	docker run -d --name $(IMAGE_NAME) --rm -p 8080:8080 $(IMAGE_NAME)
+	docker run -d --name $(IMAGE_NAME) --rm \
+	-e GOOGLE_CLOUD_PROJECT=$(GOOGLE_CLOUD_PROJECT) \
+	-e GOOGLE_APPLICATION_CREDENTIALS=$(GOOGLE_APPLICATION_CREDENTIALS) \
+	-p 8080:8080 \
+	$(IMAGE_NAME)
 
 .PHONY: stop
 stop:
