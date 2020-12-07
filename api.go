@@ -232,8 +232,6 @@ func convertToPhoto(r *http.Request) (Photo, error) {
 		return Photo{}, wrapError(err)
 	}
 
-	fmt.Println(photo)
-
 	if photo.ID == "" {
 		_uuid, err := uuid.NewUUID()
 		if err != nil {
