@@ -24,6 +24,7 @@ run:
 	docker run -d --name $(IMAGE_NAME) --rm \
 	-e GOOGLE_CLOUD_PROJECT \
 	-e GOOGLE_APPLICATION_CREDENTIALS \
+	-e BUCKET_NAME \
 	-p 8080:8080 \
 	$(IMAGE_NAME)
 

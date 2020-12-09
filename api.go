@@ -1,16 +1,19 @@
 package p
 
 import (
+	"bufio"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"runtime"
-	"strconv"
+	"time"
 
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/storage"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -62,6 +65,12 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if err := uploadFile(ctx, &photo); err != nil {
+			fmt.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		if err = createPhoto(ctx, photo); err != nil {
 			fmt.Println(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -101,7 +110,7 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 }
 
 func getPhotoList(ctx context.Context) ([]byte, error) {
-	client, err := createClient(ctx)
+	client, err := firestoreClient(ctx)
 	if err != nil {
 		return nil, wrapError(err)
 	}
@@ -129,7 +138,7 @@ func getPhotoList(ctx context.Context) ([]byte, error) {
 }
 
 func createPhoto(ctx context.Context, photo Photo) error {
-	client, err := createClient(ctx)
+	client, err := firestoreClient(ctx)
 	if err != nil {
 		return wrapError(err)
 	}
@@ -143,7 +152,7 @@ func createPhoto(ctx context.Context, photo Photo) error {
 }
 
 func updatePhoto(ctx context.Context, photo Photo) error {
-	client, err := createClient(ctx)
+	client, err := firestoreClient(ctx)
 	if err != nil {
 		return wrapError(err)
 	}
@@ -173,7 +182,7 @@ func updatePhoto(ctx context.Context, photo Photo) error {
 }
 
 func deletePhoto(ctx context.Context, photoID string) error {
-	client, err := createClient(ctx)
+	client, err := firestoreClient(ctx)
 	if err != nil {
 		return wrapError(err)
 	}
@@ -197,7 +206,7 @@ func deletePhoto(ctx context.Context, photoID string) error {
 	return nil
 }
 
-func createClient(ctx context.Context) (*firestore.Client, error) {
+func firestoreClient(ctx context.Context) (*firestore.Client, error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
 
 	client, err := firestore.NewClient(ctx, projectID)
@@ -216,19 +225,19 @@ func wrapError(err error) error {
 }
 
 func convertToPhoto(r *http.Request) (Photo, error) {
-	length, err := strconv.Atoi(r.Header.Get("Content-Length"))
+	reader, err := gzip.NewReader(r.Body)
 	if err != nil {
 		return Photo{}, wrapError(err)
 	}
+	var unzipByte []byte
 
-	body := make([]byte, length)
-	length, err = r.Body.Read(body)
-	if err != nil && err != io.EOF {
-		return Photo{}, wrapError(err)
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		unzipByte = scanner.Bytes()
 	}
-
 	var photo Photo
-	if err := json.Unmarshal(body[:length], &photo); err != nil {
+
+	if err := json.Unmarshal(unzipByte, &photo); err != nil {
 		return Photo{}, wrapError(err)
 	}
 
@@ -246,4 +255,31 @@ func convertToPhoto(r *http.Request) (Photo, error) {
 	}
 
 	return photo, nil
+}
+
+func uploadFile(ctx context.Context, photo *Photo) error {
+	data, _ := base64.RawStdEncoding.DecodeString(photo.Image)
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return wrapError(err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*50)
+	defer cancel()
+
+	wc := client.Bucket(os.Getenv("BUCKET_NAME")).Object(photo.ID + ".png").NewWriter(ctx)
+	wc.ContentType = "image/png"
+
+	if _, err := wc.Write(data); err != nil {
+		return wrapError(err)
+	}
+	if err := wc.Close(); err != nil {
+		return wrapError(err)
+	}
+
+	photo.Image = fmt.Sprintf("https://storage.googleapis.com/keen-genius-283611.appspot.com/%s.png", photo.ID)
+
+	return nil
 }
