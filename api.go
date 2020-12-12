@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -20,10 +21,10 @@ import (
 )
 
 const (
-	// KmLat is Latitude per kilometer in Japan
-	KmLat = 0.0090133
-	// KmLng is Longitude per kilometer in Japan
-	KmLng = 0.0109664
+	// HectometerLat is Latitude per Hectometer in Japan
+	HectometerLat = 0.0009013
+	// HectometerLng is Longitude per Hectometer in Japan
+	HectometerLng = 0.0010966
 )
 
 // Photo ...
@@ -47,7 +48,20 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// GET: /photos
-		res, err := getPhotoList(ctx)
+		lat, err := strconv.ParseFloat(r.FormValue("lat"), 64)
+		if err != nil {
+			fmt.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		lng, err := strconv.ParseFloat(r.FormValue("lng"), 64)
+		if err != nil {
+			fmt.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		res, err := getPhotoList(ctx, lat, lng)
 		if err != nil {
 			fmt.Println(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -109,7 +123,7 @@ func HTTPFunction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPhotoList(ctx context.Context) ([]byte, error) {
+func getPhotoList(ctx context.Context, lat, lng float64) ([]byte, error) {
 	client, err := firestoreClient(ctx)
 	if err != nil {
 		return nil, wrapError(err)
@@ -123,9 +137,13 @@ func getPhotoList(ctx context.Context) ([]byte, error) {
 
 	photos := make([]Photo, 0, len(iter))
 
+	// firestoreは多重queryを利用できないので全件取得して絞り込む
 	for _, doc := range iter {
 		var p Photo
-		doc.DataTo(&p)
+		if err := doc.DataTo(&p); err != nil || !includeInArea(p, float32(lat), float32(lng)) {
+			continue
+		}
+
 		photos = append(photos, p)
 	}
 
@@ -206,22 +224,11 @@ func deletePhoto(ctx context.Context, photoID string) error {
 	return nil
 }
 
-func firestoreClient(ctx context.Context) (*firestore.Client, error) {
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+func includeInArea(photo Photo, lat, lng float32) bool {
+	checkLat := photo.Latitude <= lat+HectometerLat && photo.Latitude >= lat-HectometerLat
+	checkLng := photo.Longitude <= lng+HectometerLng && photo.Longitude >= lng-HectometerLng
 
-	client, err := firestore.NewClient(ctx, projectID)
-	if err != nil {
-		return nil, wrapError(err)
-	}
-
-	return client, nil
-}
-
-func wrapError(err error) error {
-	pc, _, line, _ := runtime.Caller(1)
-	f := runtime.FuncForPC(pc)
-	message := fmt.Sprintf("\nerror in %s method. line: %d", f.Name(), line)
-	return errors.Wrap(err, message)
+	return checkLat && checkLng
 }
 
 func convertToPhoto(r *http.Request) (Photo, error) {
@@ -279,7 +286,25 @@ func uploadFile(ctx context.Context, photo *Photo) error {
 		return wrapError(err)
 	}
 
-	photo.Image = fmt.Sprintf("https://storage.googleapis.com/keen-genius-283611.appspot.com/%s.png", photo.ID)
+	photo.Image = fmt.Sprintf("https://storage.googleapis.com/%s/%s.png", os.Getenv("BUCKET_NAME"), photo.ID)
 
 	return nil
+}
+
+func firestoreClient(ctx context.Context) (*firestore.Client, error) {
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+
+	client, err := firestore.NewClient(ctx, projectID)
+	if err != nil {
+		return nil, wrapError(err)
+	}
+
+	return client, nil
+}
+
+func wrapError(err error) error {
+	pc, _, line, _ := runtime.Caller(1)
+	f := runtime.FuncForPC(pc)
+	message := fmt.Sprintf("\nerror in %s method. line: %d", f.Name(), line)
+	return errors.Wrap(err, message)
 }
